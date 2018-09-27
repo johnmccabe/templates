@@ -11,38 +11,43 @@ COPY --from=composer /usr/bin/composer /usr/bin/composer
 ARG COMPOSER_AUTH='{}'
 ENV COMPOSER_AUTH=${COMPOSER_AUTH}
 
-# Add git
-RUN apk add --no-cache git
-
 # Add watchdog
-RUN echo "Pulling watchdog binary from Github."
-RUN curl -sSL https://github.com/openfaas/faas/releases/download/0.9.4/fwatchdog > /usr/bin/fwatchdog
-RUN chmod +x /usr/bin/fwatchdog
+RUN apk --no-cache add curl \
+    && echo "Pulling watchdog binary from Github." \
+    && curl -sSL https://github.com/openfaas/faas/releases/download/0.9.4/fwatchdog > /usr/bin/fwatchdog \
+    && chmod +x /usr/bin/fwatchdog \
+    && apk del curl --no-cache
 
-# create non-root user
-RUN addgroup -S app && adduser -S -g app app
-RUN mkdir -p /home/app
+# create non-root user and install Git
+RUN addgroup -S app \
+    && adduser -S -g app app \
+    && mkdir -p /home/app \
+    && apk add --no-cache git
 
-# Core
+# Copy function code to image
 WORKDIR /home/app
-
-# Function
 COPY index.php php-extension.sh composer.* ./
-RUN chmod u+x ./php-extension.sh && ./php-extension.sh
 COPY ./function ./function
-WORKDIR /home/app/function
 
-# Install Dependecies
-RUN [[ -f php-extension.sh ]] && sh ./php-extension.sh || \
-    echo "php-extension.sh does not exist, skip installing PHP extensions"
-RUN [[ -f composer.lock || -f composer.json ]] && composer install --no-dev || \
+# Install PHP Extensions
+WORKDIR /home/app/function
+RUN echo "Installing PHP Extensions" \
+    && [[ -f php-extension.sh ]] && sh ./php-extension.sh || \
+    echo "php-extension.sh does not exist, skip installing PHP extensions" \
+    && chown -R app /home/app/function
+
+# Install Composer Dependencies
+USER app
+RUN echo "Installing Composer Dependencies" \
+    && [[ -f composer.lock || -f composer.json ]] && composer install --no-dev || \
     echo "composer.lock does not exist, skip installing composer dependencies"
 
 # Cleanup
-RUN apk del git
-RUN rm -rf /usr/src/php
-RUN { find /usr/local/lib -type f -print0 | xargs -0r strip --strip-all -p 2>/dev/null || true; }
-RUN chown -R app /home/app
+USER root
+RUN apk del git --no-cache \
+    && rm -rf /usr/src/php \
+    && { find /usr/local/lib -type f -print0 | xargs -0r strip --strip-all -p 2>/dev/null || true; } \
+    && chown -R app /home/app
 
 # Entry
 USER app
